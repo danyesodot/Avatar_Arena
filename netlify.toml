@@ -1,0 +1,4 @@
+# Netlify מגיש רק את התיקייה public – המשחק רץ בדפדפן של מי שפותח חדר (P2P)
+[build]
+  publish = "public"
+  command = ""

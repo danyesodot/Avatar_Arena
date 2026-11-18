@@ -7,7 +7,7 @@
   let W = 0, H = 0, DPR = 1;
 
   // ================================================================ מצב
-  let ws = null, myId = 0, MAP = null, PR = 22;
+  let myId = 0, MAP = null, PR = 22;
   let selected = localStorage.getItem('avatar.char') || 'aang';
   if (!BY_ID[selected]) selected = 'aang';
   let joined = false, changingChar = false;
@@ -84,6 +84,8 @@
     li.innerHTML = `<kbd>F</kbd><div><b>${WALL.name} (${el.name})</b><span>בונה חומת מגן מול הדמות</span></div>`;
     ul.appendChild(li);
     $('playBtn').textContent = changingChar ? 'בחר דמות ✓' : 'היכנס לזירה ⚔';
+    $('playBtn').classList.toggle('hidden', !changingChar && netMode !== 'server');
+    $('roomBox').classList.toggle('hidden', changingChar || netMode !== 'p2p');
   }
 
   function describe(a) {
@@ -110,43 +112,155 @@
   }
 
   $('nameInput').value = localStorage.getItem('avatar.name') || '';
+  function playerName() {
+    const name = $('nameInput').value.trim() || 'שחקן' + Math.floor(Math.random() * 1000);
+    localStorage.setItem('avatar.name', name);
+    return name;
+  }
+  function busy(on, text) {
+    for (const id of ['playBtn', 'hostBtn', 'joinBtn']) $(id).disabled = on;
+    $('connStatus').textContent = text || '';
+  }
   $('playBtn').onclick = () => {
     Sfx.init();
     if (changingChar) {
       changingChar = false; send({ t: 'char', char: selected }); $('menu').classList.add('hidden'); showDetails(); return;
     }
-    const name = $('nameInput').value.trim() || 'שחקן' + Math.floor(Math.random() * 1000);
-    localStorage.setItem('avatar.name', name);
-    connect(name);
+    connectServer(playerName());
   };
-  $('nameInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('playBtn').click(); });
+  $('hostBtn').onclick = () => { Sfx.init(); hostRoom(playerName()); };
+  $('joinBtn').onclick = () => {
+    Sfx.init();
+    const code = $('codeInput').value.trim().toUpperCase();
+    if (code.length < 4) { $('connStatus').textContent = 'הקלד את קוד החדר שקיבלת מחבר'; return; }
+    joinRoom(playerName(), code);
+  };
+  $('nameInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') (netMode === 'server' ? $('playBtn') : $('hostBtn')).click(); });
+  $('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('joinBtn').click(); });
 
   // ================================================================ רשת
-  function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+  // שני מצבים: "server" – יש שרת Node (WebSocket). "p2p" – אירוח סטטי (Netlify):
+  // מי שיוצר חדר מריץ את המשחק אצלו, והחברים מתחברים אליו ישירות עם קוד חדר (PeerJS / WebRTC)
+  let net = null, netMode = 'p2p', roomCode = '', isHost = false, remoteClient = false;
+  const PEER_PREFIX = 'avatar-arena-zx7-';
+  const PEER_OPTS = { config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] } };
+  function send(o) { if (net) net.send(JSON.stringify(o)); }
 
-  function connect(name) {
-    $('connStatus').textContent = 'מתחבר...';
-    $('playBtn').disabled = true;
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}`);
-    ws.onopen = () => { send({ t: 'join', name, char: selected }); };
-    ws.onmessage = (ev) => {
-      const m = JSON.parse(ev.data);
-      if (m.t === 's') onSnapshot(m);
-      else if (m.t === 'welcome') {
-        myId = m.id; MAP = m.map; PR = m.pr; joined = true;
-        buildGround(); buildMinimapBase(); buildAbilityBar();
-        $('menu').classList.add('hidden'); $('hud').classList.remove('hidden');
-        $('playBtn').disabled = false; $('connStatus').textContent = '';
-      } else if (m.t === 'pong') ping = Math.round(performance.now() - m.c);
-    };
-    ws.onclose = () => {
-      $('playBtn').disabled = false;
-      if (joined) { showCenter('החיבור לשרת נותק', 'רענן את הדף כדי להתחבר מחדש', 999); }
-      else $('connStatus').textContent = 'לא הצלחתי להתחבר לשרת. ודא שהשרת רץ (npm start).';
-    };
-    ws.onerror = () => {};
+  function onRaw(data) {
+    const m = typeof data === 'string' ? JSON.parse(data) : data;
+    if (m.t === 's') onSnapshot(m);
+    else if (m.t === 'welcome') {
+      myId = m.id; MAP = m.map; PR = m.pr; joined = true;
+      buildGround(); buildMinimapBase(); buildAbilityBar();
+      $('menu').classList.add('hidden'); $('hud').classList.remove('hidden');
+      busy(false); showRoomInfo();
+    } else if (m.t === 'pong') ping = Math.round(performance.now() - m.c);
   }
+  function onLost(text) {
+    busy(false);
+    if (joined) showCenter(text || 'החיבור נותק', 'רענן את הדף כדי להתחבר מחדש', 999);
+    else $('connStatus').textContent = text || 'החיבור נכשל';
+  }
+
+  function connectServer(name) {
+    busy(true, 'מתחבר...');
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${location.host}`);
+    net = { send: (s) => { if (ws.readyState === 1) ws.send(s); } };
+    ws.onopen = () => send({ t: 'join', name, char: selected });
+    ws.onmessage = (ev) => onRaw(ev.data);
+    ws.onclose = () => onLost(joined ? 'החיבור לשרת נותק' : 'לא הצלחתי להתחבר לשרת. ודא שהשרת רץ (npm start).');
+  }
+
+  function makeCode() { const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s = ''; for (let i = 0; i < 5; i++) s += A[Math.floor(Math.random() * A.length)]; return s; }
+
+  function hostRoom(name, tries = 0) {
+    if (typeof Peer === 'undefined') { $('connStatus').textContent = 'ספריית החיבור לא נטענה – בדוק חיבור לאינטרנט ורענן'; return; }
+    busy(true, 'פותח חדר...');
+    const code = makeCode();
+    const peer = new Peer(PEER_PREFIX + code, PEER_OPTS);
+    let started = false;
+    const conns = new Map(); let nextPeerId = 1;
+    peer.on('open', () => {
+      started = true; roomCode = code; isHost = true;
+      const worker = new Worker('shared/engine-worker.js');
+      worker.onmessage = (e) => {
+        const { id, s } = e.data;
+        if (id === 0) onRaw(s);
+        else { const c = conns.get(id); if (c && c.open) { try { c.send(s); } catch (err) {} } }
+      };
+      worker.onerror = (e) => onLost('שגיאה במנוע המשחק: ' + (e.message || ''));
+      net = { send: (s) => worker.postMessage({ k: 'msg', id: 0, msg: JSON.parse(s) }) };
+      worker.postMessage({ k: 'join', id: 0, msg: { name, char: selected } });
+      history.replaceState(null, '', '?room=' + code);
+      peer.on('connection', (conn) => {
+        const id = nextPeerId++;
+        conn.on('open', () => { conns.set(id, conn); });
+        conn.on('data', (d) => {
+          let msg; try { msg = typeof d === 'string' ? JSON.parse(d) : d; } catch (err) { return; }
+          if (!msg) return;
+          if (msg.t === 'join') worker.postMessage({ k: 'join', id, msg, opts: { sendEvery: 2 } });
+          else worker.postMessage({ k: 'msg', id, msg });
+        });
+        const bye = () => { if (conns.has(id)) { conns.delete(id); worker.postMessage({ k: 'leave', id }); } };
+        conn.on('close', bye); conn.on('error', bye);
+      });
+    });
+    peer.on('disconnected', () => { if (started) try { peer.reconnect(); } catch (e) {} });
+    peer.on('error', (err) => {
+      if (!started && err.type === 'unavailable-id' && tries < 3) { peer.destroy(); return hostRoom(name, tries + 1); }
+      if (!started) { peer.destroy(); busy(false, 'לא הצלחתי לפתוח חדר (' + err.type + '). נסה שוב.'); }
+    });
+  }
+
+  function joinRoom(name, code) {
+    if (typeof Peer === 'undefined') { $('connStatus').textContent = 'ספריית החיבור לא נטענה – בדוק חיבור לאינטרנט ורענן'; return; }
+    busy(true, 'מחפש את החדר ' + code + '...');
+    const peer = new Peer(undefined, PEER_OPTS);
+    let opened = false;
+    const fail = (t) => { if (!opened) { busy(false, t); try { peer.destroy(); } catch (e) {} } else onLost(t); };
+    peer.on('open', () => {
+      const conn = peer.connect(PEER_PREFIX + code, { reliable: true, serialization: 'json' });
+      const timeout = setTimeout(() => fail('לא הצלחתי להתחבר לחדר ' + code + '. ודא שהקוד נכון ושהחבר שפתח את החדר עדיין במשחק.'), 15000);
+      conn.on('open', () => {
+        clearTimeout(timeout); opened = true; roomCode = code; remoteClient = true;
+        net = { send: (s) => { if (conn.open) conn.send(s); } };
+        send({ t: 'join', name, char: selected });
+        history.replaceState(null, '', '?room=' + code);
+      });
+      conn.on('data', (d) => onRaw(d));
+      conn.on('close', () => fail('מי שפתח את החדר יצא – החדר נסגר'));
+    });
+    peer.on('error', (err) => {
+      if (err.type === 'peer-unavailable') fail('לא נמצא חדר עם הקוד ' + code + '. בדוק את הקוד.');
+      else if (!opened) fail('שגיאת חיבור (' + err.type + '). נסה שוב.');
+    });
+  }
+
+  function roomLink() { return location.origin + location.pathname + '?room=' + roomCode; }
+  function showRoomInfo() {
+    const box = $('roomInfo');
+    if (!roomCode) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    $('roomCodeText').textContent = roomCode;
+    $('roomHint').textContent = isHost ? 'אתה המארח – המשחק רץ אצלך. אם תסגור את הלשונית, החדר ייסגר.' : 'מחובר לחדר של חבר';
+  }
+  $('copyLinkBtn').onclick = async () => {
+    try { await navigator.clipboard.writeText(roomLink()); $('copyLinkBtn').textContent = 'הועתק ✓'; }
+    catch (e) { prompt('העתק את הקישור ושלח לחברים:', roomLink()); }
+    setTimeout(() => { $('copyLinkBtn').textContent = 'העתק קישור לחברים'; }, 1800);
+  };
+  window.addEventListener('beforeunload', (e) => { if (isHost && joined) { e.preventDefault(); e.returnValue = ''; } });
+
+  // זיהוי מצב: אם יש שרת Node – משחקים דרכו, אחרת (Netlify) – חדרים
+  function setMode(m) {
+    netMode = m;
+    showDetails();
+    const code = new URLSearchParams(location.search).get('room');
+    if (m === 'p2p' && code) { $('codeInput').value = code.toUpperCase(); $('joinBtn').textContent = 'הצטרף לחדר ' + code.toUpperCase(); $('joinBtn').classList.add('primary'); }
+  }
+  setMode('p2p');
+  fetch('server.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(j => { if (j && j.server) setMode('server'); }).catch(() => {});
   setInterval(() => send({ t: 'ping', c: performance.now() }), 2000);
 
   function onSnapshot(m) {
@@ -187,7 +301,7 @@
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   function myRenderPos() {
-    const p = interpPlayer(myId, performance.now() - 40);
+    const p = interpPlayer(myId, performance.now() - (remoteClient ? 85 : 40));
     return p || { x: cam.x, y: cam.y };
   }
 
@@ -238,7 +352,12 @@
   function nearMe(x, y, r = 900) { const p = myRenderPos(); return Math.hypot(x - p.x, y - p.y) < r; }
   function playerPos(id) { if (!latest) return null; const p = latest.P.find(q => q.i === id); return p; }
 
+  const ALWAYS_EVENTS = new Set(['kill', 'join', 'leave', 'win', 'go', 'countdown']);
   function handleEvent(e, m) {
+    // כשהלשונית ברקע לא צוברים אפקטים ומספרים (אחרת הכול "מתפוצץ" כשחוזרים אליה)
+    if (document.hidden && !ALWAYS_EVENTS.has(e.e)) return;
+    if (floaters.length > 60) floaters.splice(0, floaters.length - 60);
+    if (effects.length > 150) effects.splice(0, effects.length - 150);
     switch (e.e) {
       case 'hit': {
         const big = e.v >= 20;
@@ -284,6 +403,7 @@
       case 'go': Sfx.play('go'); break;
       case 'storm': showCenter('הסערה מתכווצת!', 'היכנס לאזור הבטוח', 2.2); break;
       case 'join': addFeedText(`${e.n} הצטרף/ה לזירה`); break;
+      case 'leave': addFeedText(`${e.n} יצא/ה מהזירה`); break;
     }
   }
 
@@ -1009,9 +1129,10 @@
     if (!joined || !latest || !groundCanvas) { if (!joined) drawMenuBackdrop(dt); return; }
     for (const [id, c] of charges) { c.t += dt; if (c.t > c.d + 0.1) charges.delete(id); }
 
-    const renderT = now - 100;
+    // מי שמחובר לחדר של חבר מקבל עדכונים בתדירות נמוכה יותר – לכן עיכוב החלקה גדול יותר
+    const renderT = now - (remoteClient ? 140 : 100);
     const players = [];
-    for (const p of latest.P) { const ip = interpPlayer(p.i, p.i === myId ? now - 40 : renderT); if (ip) players.push(ip); }
+    for (const p of latest.P) { const ip = interpPlayer(p.i, p.i === myId ? now - (remoteClient ? 85 : 40) : renderT); if (ip) players.push(ip); }
     const myP = players.find(p => p.i === myId);
     const myChar = myP ? myP.c : selected;
     const viewerSeismic = !!BY_ID[myChar].seismic;
