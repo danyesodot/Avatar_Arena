@@ -1,3 +1,13 @@
+---
+title: Avatar Arena
+emoji: 🔥
+colorFrom: yellow
+colorTo: red
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # ⚔ זירת האווטאר
 
 משחק קרב אונליין בסגנון באטל רויאל: בוחרים דמות מ"אווטאר: כשף האוויר האחרון", נכנסים לזירה ונלחמים עד שנשאר רק אחד. הסערה מתכווצת, ויש חומות, פריטים ובוטים.
@@ -17,7 +27,12 @@ npm start
 ## לשחק עם חברים
 
 - **באותה רשת (Wi-Fi):** השרת מדפיס כתובת כמו `http://192.168.1.20:3000`. החברים פותחים אותה בדפדפן ומצטרפים לאותה זירה. אם זה לא עובד, צריך לאשר את Node בחומת האש של Windows.
-- **דרך האינטרנט (ענן, חינם):** המשחק מוכן לאירוח ב-Render (הקובץ `render.yaml` כבר מגדיר הכול):
+- **דרך האינטרנט (חינם, בלי כרטיס אשראי): Hugging Face Spaces.** ה-`Dockerfile` וההגדרות בראש הקובץ הזה כבר מוכנים:
+  1. פותחים חשבון חינמי ב-https://huggingface.co.
+  2. **New → Space**: בוחרים שם, **Docker** ואז **Blank**, חומרה **CPU basic (Free)**, ו-Public.
+  3. דוחפים את הקוד ל-Space: `git remote add hf https://huggingface.co/spaces/<user>/<name>` ואז `git push hf main`. בתור סיסמה מזינים Access Token עם הרשאת Write מ-https://huggingface.co/settings/tokens.
+  4. המשחק עולה בכתובת `https://<user>-<name>.hf.space`.
+- **אפשרות נוספת: Render** (הקובץ `render.yaml` מגדיר הכול, אבל לפעמים מבקשים כרטיס אשראי):
   1. מעלים את הפרויקט ל-GitHub.
   2. נכנסים ל-https://render.com עם חשבון ה-GitHub, ובוחרים **New → Blueprint**.
   3. בוחרים את המאגר ולוחצים **Deploy**. אחרי כמה דקות מקבלים כתובת כמו `https://avatar-arena.onrender.com` ושולחים אותה לחברים.
