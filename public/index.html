@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>זירת האווטאר</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;600;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- מסך פתיחה ובחירת דמות -->
+  <div id="menu" class="screen">
+    <div class="menu-bg"></div>
+    <header class="logo">
+      <div class="elements-row"><span class="el air"></span><span class="el water"></span><span class="el earth"></span><span class="el fire"></span></div>
+      <h1>זירת האווטאר</h1>
+      <p class="sub">מים. אדמה. אש. אוויר. – רק אחד ישרוד.</p>
+    </header>
+
+    <div class="menu-body">
+      <section class="pick">
+        <div class="filters" id="filters"></div>
+        <div class="grid" id="charGrid"></div>
+      </section>
+      <aside class="details" id="details">
+        <canvas id="bigPortrait" width="360" height="360"></canvas>
+        <div class="d-head">
+          <h2 id="dName"></h2>
+          <div class="d-title" id="dTitle"></div>
+          <div class="d-tags"><span id="dElement" class="tag"></span><span id="dFaction" class="tag ghost"></span></div>
+        </div>
+        <p id="dDesc" class="d-desc"></p>
+        <div class="stats">
+          <div class="stat"><label>חיים</label><div class="bar"><i id="sHp"></i></div></div>
+          <div class="stat"><label>מהירות</label><div class="bar"><i id="sSpd"></i></div></div>
+        </div>
+        <ul id="dAbilities" class="abilities"></ul>
+        <div class="join">
+          <input id="nameInput" maxlength="16" placeholder="השם שלך" autocomplete="off">
+          <button id="playBtn" class="btn primary">היכנס לזירה ⚔</button>
+        </div>
+        <div id="connStatus" class="conn"></div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="topBar">
+      <div class="pill" id="aliveBox"><b id="aliveCount">0</b> בחיים</div>
+      <div class="pill" id="phaseBox"></div>
+      <div class="pill" id="killsBox">⚔ <b id="killCount">0</b></div>
+    </div>
+    <div id="killFeed"></div>
+    <div id="centerMsg"></div>
+    <div id="lobbyPanel" class="panel hidden">
+      <div class="lp-title">אזור אימון</div>
+      <div class="lp-row">
+        <label>בוטים בקרב:</label>
+        <input type="range" id="botRange" min="0" max="24" value="9">
+        <b id="botVal">9</b>
+      </div>
+      <div class="lp-row"><label>רמת קושי:</label>
+        <div class="seg" id="diffSeg">
+          <button data-d="easy">קל</button><button data-d="medium">בינוני</button><button data-d="hard">קשה</button>
+        </div>
+      </div>
+      <button id="startBtn" class="btn primary">התחל באטל רויאל!</button>
+      <button id="changeCharBtn" class="btn">החלף דמות</button>
+      <div class="lp-hint">חברים יכולים להצטרף מאותה כתובת – ברגע שתלחץ התחל, כולם נזרקים לזירה.</div>
+    </div>
+    <div id="bottomBar">
+      <div id="hpWrap">
+        <div id="charName"></div>
+        <div class="hpbar"><i id="hpFill"></i><span id="hpText"></span></div>
+        <div id="statusIcons"></div>
+      </div>
+      <div id="abilityBar"></div>
+    </div>
+    <canvas id="minimap" width="200" height="200"></canvas>
+    <div id="controlsHint">WASD תנועה · עכבר כיוון · קליק התקפה · Q / E יכולות · רווח/קליק ימני הגנה · R אולטימייט · F חומה · Tab טבלה</div>
+    <div id="scoreboard" class="panel hidden"></div>
+    <div id="endScreen" class="hidden"></div>
+  </div>
+
+  <script src="/shared/characters.js"></script>
+  <script src="art.js"></script>
+  <script src="sfx.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

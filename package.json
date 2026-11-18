@@ -1,0 +1,15 @@
+{
+  "name": "avatar-arena",
+  "version": "1.0.0",
+  "description": "משחק קרב אונליין בסגנון באטל רויאל עם דמויות אווטאר",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
