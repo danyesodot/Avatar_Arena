@@ -86,6 +86,7 @@
     $('playBtn').textContent = changingChar ? 'בחר דמות ✓' : 'היכנס לזירה ⚔';
     $('playBtn').classList.toggle('hidden', !changingChar && netMode !== 'server');
     $('roomBox').classList.toggle('hidden', changingChar || netMode !== 'p2p');
+    $('hostBtn').classList.toggle('hidden', changingChar || netMode !== 'p2p');
   }
 
   function describe(a) {
@@ -124,17 +125,18 @@
   $('playBtn').onclick = () => {
     Sfx.init();
     if (changingChar) {
-      changingChar = false; send({ t: 'char', char: selected }); $('menu').classList.add('hidden'); showDetails(); return;
+      changingChar = false; send({ t: 'char', char: selected, name: playerName() }); $('menu').classList.add('hidden'); showDetails(); return;
     }
     connectServer(playerName());
   };
   $('hostBtn').onclick = () => { Sfx.init(); hostRoom(playerName()); };
   $('joinBtn').onclick = () => {
     Sfx.init();
-    const code = $('codeInput').value.trim().toUpperCase();
-    if (code.length < 4) { $('connStatus').textContent = 'הקלד את קוד החדר שקיבלת מחבר'; return; }
-    joinRoom(playerName(), code);
+    const n = parseInt($('codeInput').value.trim(), 10);
+    if (!(n >= 1 && n <= MAX_ROOMS)) { $('connStatus').textContent = `הקלד מספר חדר בין 1 ל-${MAX_ROOMS}`; return; }
+    joinRoom(playerName(), String(n));
   };
+  $('refreshRooms').onclick = () => scanRooms();
   $('nameInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') (netMode === 'server' ? $('playBtn') : $('hostBtn')).click(); });
   $('codeInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('joinBtn').click(); });
 
@@ -143,6 +145,9 @@
   // מי שיוצר חדר מריץ את המשחק אצלו, והחברים מתחברים אליו ישירות עם קוד חדר (PeerJS / WebRTC)
   let net = null, netMode = 'p2p', roomCode = '', isHost = false, remoteClient = false;
   const PEER_PREFIX = 'avatar-arena-zx7-';
+  const MAX_ROOMS = 12; // החדרים ממוספרים 1–12, כך שאפשר לחפש אותם בלי שרת
+  const roomPeerId = (n) => PEER_PREFIX + 'room' + n;
+  let leaving = false;
   const PEER_OPTS = { config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] } };
   function send(o) { if (net) net.send(JSON.stringify(o)); }
 
@@ -172,15 +177,17 @@
     ws.onclose = () => onLost(joined ? 'החיבור לשרת נותק' : 'לא הצלחתי להתחבר לשרת. ודא שהשרת רץ (npm start).');
   }
 
-  function makeCode() { const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s = ''; for (let i = 0; i < 5; i++) s += A[Math.floor(Math.random() * A.length)]; return s; }
-
-  function hostRoom(name, tries = 0) {
+  // פותח חדר במספר הפנוי הראשון (או הבא אחריו, אם תפוס)
+  function hostRoom(name, slot) {
     if (typeof Peer === 'undefined') { $('connStatus').textContent = 'ספריית החיבור לא נטענה – בדוק חיבור לאינטרנט ורענן'; return; }
+    if (!slot) { slot = 1; while (foundRooms.has(slot) && slot < MAX_ROOMS) slot++; }
+    if (slot > MAX_ROOMS) { busy(false, 'כל החדרים תפוסים כרגע – הצטרף לאחד מהם'); return; }
+    stopScanning();
     busy(true, 'פותח חדר...');
-    const code = makeCode();
-    const peer = new Peer(PEER_PREFIX + code, PEER_OPTS);
+    const code = String(slot);
+    const peer = new Peer(roomPeerId(slot), PEER_OPTS);
     let started = false;
-    const conns = new Map(); let nextPeerId = 1;
+    const conns = new Map(), joinedIds = new Set(); let nextPeerId = 1;
     peer.on('open', () => {
       started = true; roomCode = code; isHost = true;
       const worker = new Worker('shared/engine-worker.js');
@@ -199,29 +206,109 @@
         conn.on('data', (d) => {
           let msg; try { msg = typeof d === 'string' ? JSON.parse(d) : d; } catch (err) { return; }
           if (!msg) return;
-          if (msg.t === 'join') worker.postMessage({ k: 'join', id, msg, opts: { sendEvery: 2 } });
-          else worker.postMessage({ k: 'msg', id, msg });
+          if (msg.t === 'info') {
+            // מישהו מחפש חדרים – מספרים לו מי המארח וכמה שחקנים יש
+            try { conn.send(JSON.stringify({ t: 'info', host: name, players: joinedIds.size + 1, phase: latest ? latest.ph : 'lobby' })); } catch (err) {}
+            return;
+          }
+          if (msg.t === 'join') { joinedIds.add(id); worker.postMessage({ k: 'join', id, msg, opts: { sendEvery: 2 } }); }
+          else if (joinedIds.has(id)) worker.postMessage({ k: 'msg', id, msg });
         });
-        const bye = () => { if (conns.has(id)) { conns.delete(id); worker.postMessage({ k: 'leave', id }); } };
+        const bye = () => {
+          conns.delete(id);
+          if (joinedIds.has(id)) { joinedIds.delete(id); worker.postMessage({ k: 'leave', id }); }
+        };
         conn.on('close', bye); conn.on('error', bye);
       });
     });
-    peer.on('disconnected', () => { if (started) try { peer.reconnect(); } catch (e) {} });
+    peer.on('disconnected', () => { if (started && !leaving) try { peer.reconnect(); } catch (e) {} });
     peer.on('error', (err) => {
-      if (!started && err.type === 'unavailable-id' && tries < 3) { peer.destroy(); return hostRoom(name, tries + 1); }
+      if (!started && err.type === 'unavailable-id') { peer.destroy(); return hostRoom(name, slot + 1); }
       if (!started) { peer.destroy(); busy(false, 'לא הצלחתי לפתוח חדר (' + err.type + '). נסה שוב.'); }
     });
   }
 
+  // ---------------------------------------------------------------- חיפוש חדרים פתוחים
+  // מנסים להתחבר לכל אחד מ-12 החדרים; מי שעונה – פתוח
+  let prober = null, scanTimer = null, scanning = false;
+  const foundRooms = new Map();
+  function stopScanning() {
+    clearInterval(scanTimer); scanTimer = null;
+    if (prober) { try { prober.destroy(); } catch (e) {} prober = null; }
+  }
+  function renderRooms(final) {
+    const list = $('roomList');
+    if (!foundRooms.size) {
+      list.innerHTML = final ? '<div class="muted">אין חדרים פתוחים כרגע. צור חדר חדש והזמן את החברים! 🏠</div>' : '<div class="muted">מחפש חדרים...</div>';
+      return;
+    }
+    list.innerHTML = '';
+    for (const [n, r] of [...foundRooms].sort((a, b) => a[0] - b[0])) {
+      const card = document.createElement('div'); card.className = 'room-card';
+      const ph = r.phase === 'lobby' ? 'באימון – אפשר להצטרף לקרב' : r.phase === 'match' || r.phase === 'countdown' ? 'בקרב – תצפה עד הסיבוב הבא' : 'סיבוב נגמר';
+      card.innerHTML = `<div class="num">${n}</div><div class="inf"><b>החדר של ${esc(r.host || '?')}</b><span>${r.players} שחקנים · ${ph}</span></div>`;
+      const b = document.createElement('button'); b.className = 'btn primary'; b.textContent = 'הצטרף';
+      b.onclick = () => { Sfx.init(); joinRoom(playerName(), String(n)); };
+      card.appendChild(b); list.appendChild(card);
+    }
+  }
+  function scanRooms() {
+    if (typeof Peer === 'undefined' || joined || netMode !== 'p2p' || scanning) return;
+    scanning = true;
+    const seen = new Map();
+    const run = () => {
+      for (let n = 1; n <= MAX_ROOMS; n++) {
+        let c;
+        try { c = prober.connect(roomPeerId(n), { serialization: 'json' }); } catch (e) { continue; }
+        c.on('open', () => { try { c.send(JSON.stringify({ t: 'info' })); } catch (e) {} });
+        c.on('data', (d) => {
+          let m; try { m = typeof d === 'string' ? JSON.parse(d) : d; } catch (e) { return; }
+          if (m && m.t === 'info') { seen.set(n, m); foundRooms.set(n, m); renderRooms(false); try { c.close(); } catch (e) {} }
+        });
+        setTimeout(() => { try { c.close(); } catch (e) {} }, 6000);
+      }
+      setTimeout(() => {
+        scanning = false;
+        for (const n of [...foundRooms.keys()]) if (!seen.has(n)) foundRooms.delete(n); // חדרים שנסגרו
+        renderRooms(true);
+      }, 4500);
+    };
+    if (prober && prober.open) run();
+    else {
+      if (prober) try { prober.destroy(); } catch (e) {}
+      prober = new Peer(undefined, PEER_OPTS);
+      prober.on('open', run);
+      prober.on('error', (err) => { if (err.type !== 'peer-unavailable') { scanning = false; renderRooms(true); } });
+    }
+  }
+  function startScanning() {
+    if (scanTimer || netMode !== 'p2p') return;
+    scanRooms();
+    scanTimer = setInterval(() => { if (!joined && !$('menu').classList.contains('hidden')) scanRooms(); }, 8000);
+  }
+
+  // ---------------------------------------------------------------- יציאה מהחדר
+  function leaveRoom() {
+    if (isHost && joined && !confirm('אתה המארח – אם תצא, החדר ייסגר לכל החברים. לצאת?')) return;
+    leaving = true;
+    location.href = location.pathname; // טעינה מחדש = ניתוק נקי וחזרה לתפריט
+  }
+  $('leaveBtn').onclick = leaveRoom;
+  window.addEventListener('keydown', (e) => { if (e.code === 'Escape' && joined && $('menu').classList.contains('hidden')) leaveRoom(); });
+
   function joinRoom(name, code) {
     if (typeof Peer === 'undefined') { $('connStatus').textContent = 'ספריית החיבור לא נטענה – בדוק חיבור לאינטרנט ורענן'; return; }
-    busy(true, 'מחפש את החדר ' + code + '...');
+    stopScanning();
+    busy(true, 'מתחבר לחדר ' + code + '...');
     const peer = new Peer(undefined, PEER_OPTS);
     let opened = false;
-    const fail = (t) => { if (!opened) { busy(false, t); try { peer.destroy(); } catch (e) {} } else onLost(t); };
+    const fail = (t) => {
+      if (leaving) return;
+      if (!opened) { busy(false, t); try { peer.destroy(); } catch (e) {} startScanning(); } else onLost(t);
+    };
     peer.on('open', () => {
-      const conn = peer.connect(PEER_PREFIX + code, { reliable: true, serialization: 'json' });
-      const timeout = setTimeout(() => fail('לא הצלחתי להתחבר לחדר ' + code + '. ודא שהקוד נכון ושהחבר שפתח את החדר עדיין במשחק.'), 15000);
+      const conn = peer.connect(roomPeerId(code), { reliable: true, serialization: 'json' });
+      const timeout = setTimeout(() => fail('לא הצלחתי להתחבר לחדר ' + code + '. ייתכן שהחדר נסגר – נסה חדר אחר.'), 15000);
       conn.on('open', () => {
         clearTimeout(timeout); opened = true; roomCode = code; remoteClient = true;
         net = { send: (s) => { if (conn.open) conn.send(s); } };
@@ -232,7 +319,7 @@
       conn.on('close', () => fail('מי שפתח את החדר יצא – החדר נסגר'));
     });
     peer.on('error', (err) => {
-      if (err.type === 'peer-unavailable') fail('לא נמצא חדר עם הקוד ' + code + '. בדוק את הקוד.');
+      if (err.type === 'peer-unavailable') fail('חדר ' + code + ' לא פתוח כרגע. בחר חדר מהרשימה או צור חדר חדש.');
       else if (!opened) fail('שגיאת חיבור (' + err.type + '). נסה שוב.');
     });
   }
@@ -242,22 +329,23 @@
     const box = $('roomInfo');
     if (!roomCode) { box.classList.add('hidden'); return; }
     box.classList.remove('hidden');
-    $('roomCodeText').textContent = roomCode;
-    $('roomHint').textContent = isHost ? 'אתה המארח – המשחק רץ אצלך. אם תסגור את הלשונית, החדר ייסגר.' : 'מחובר לחדר של חבר';
+    $('roomCodeText').textContent = 'חדר ' + roomCode;
+    $('roomHint').textContent = isHost ? 'אתה המארח – המשחק רץ אצלך. החברים יראו את החדר ברשימה "חדרים פתוחים", או שתשלח להם קישור.' : 'מחובר לחדר של חבר';
   }
   $('copyLinkBtn').onclick = async () => {
     try { await navigator.clipboard.writeText(roomLink()); $('copyLinkBtn').textContent = 'הועתק ✓'; }
     catch (e) { prompt('העתק את הקישור ושלח לחברים:', roomLink()); }
     setTimeout(() => { $('copyLinkBtn').textContent = 'העתק קישור לחברים'; }, 1800);
   };
-  window.addEventListener('beforeunload', (e) => { if (isHost && joined) { e.preventDefault(); e.returnValue = ''; } });
+  window.addEventListener('beforeunload', (e) => { if (isHost && joined && !leaving) { e.preventDefault(); e.returnValue = ''; } });
 
   // זיהוי מצב: אם יש שרת Node – משחקים דרכו, אחרת (Netlify) – חדרים
   function setMode(m) {
     netMode = m;
     showDetails();
     const code = new URLSearchParams(location.search).get('room');
-    if (m === 'p2p' && code) { $('codeInput').value = code.toUpperCase(); $('joinBtn').textContent = 'הצטרף לחדר ' + code.toUpperCase(); $('joinBtn').classList.add('primary'); }
+    if (m === 'p2p' && code && /^\d+$/.test(code)) { $('codeInput').value = code; $('joinBtn').textContent = 'הצטרף לחדר ' + code; $('joinBtn').classList.add('primary'); }
+    if (m === 'p2p') startScanning(); else stopScanning();
   }
   setMode('p2p');
   fetch('server.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(j => { if (j && j.server) setMode('server'); }).catch(() => {});
@@ -404,6 +492,7 @@
       case 'storm': showCenter('הסערה מתכווצת!', 'היכנס לאזור הבטוח', 2.2); break;
       case 'join': addFeedText(`${e.n} הצטרף/ה לזירה`); break;
       case 'leave': addFeedText(`${e.n} יצא/ה מהזירה`); break;
+      case 'rename': addFeedText(`${e.o} שינה/תה שם ל-${e.n}`); break;
     }
   }
 

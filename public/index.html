@@ -20,6 +20,28 @@
       <p class="sub">מים. אדמה. אש. אוויר. – רק אחד ישרוד.</p>
     </header>
 
+    <!-- שם, חדרים והצטרפות – למעלה, שיהיה קל למצוא -->
+    <section class="play-bar">
+      <div class="pb-col pb-me">
+        <label for="nameInput">השם שלך</label>
+        <input id="nameInput" maxlength="16" placeholder="הקלד שם" autocomplete="off">
+        <button id="playBtn" class="btn primary hidden">היכנס לזירה ⚔</button>
+        <button id="hostBtn" class="btn primary">צור חדר חדש 🏠</button>
+        <div id="connStatus" class="conn"></div>
+      </div>
+      <div id="roomBox" class="pb-col pb-rooms">
+        <div class="rooms-head">
+          <b>חדרים פתוחים</b>
+          <button id="refreshRooms" class="btn small">רענן ↻</button>
+        </div>
+        <div id="roomList" class="room-list"><div class="muted">מחפש חדרים...</div></div>
+        <div class="join-code">
+          <input id="codeInput" maxlength="2" inputmode="numeric" placeholder="מס׳ חדר" autocomplete="off">
+          <button id="joinBtn" class="btn">הצטרף לפי מספר</button>
+        </div>
+      </div>
+    </section>
+
     <div class="menu-body">
       <section class="pick">
         <div class="filters" id="filters"></div>
@@ -38,19 +60,6 @@
           <div class="stat"><label>מהירות</label><div class="bar"><i id="sSpd"></i></div></div>
         </div>
         <ul id="dAbilities" class="abilities"></ul>
-        <div class="join">
-          <input id="nameInput" maxlength="16" placeholder="השם שלך" autocomplete="off">
-          <button id="playBtn" class="btn primary hidden">היכנס לזירה ⚔</button>
-        </div>
-        <div id="roomBox" class="room-box">
-          <button id="hostBtn" class="btn primary">צור חדר חדש 🏠</button>
-          <div class="or">או הצטרף לחבר</div>
-          <div class="join-code">
-            <input id="codeInput" maxlength="5" placeholder="קוד חדר" autocomplete="off">
-            <button id="joinBtn" class="btn">הצטרף</button>
-          </div>
-        </div>
-        <div id="connStatus" class="conn"></div>
       </aside>
     </div>
   </div>
@@ -61,13 +70,14 @@
       <div class="pill" id="aliveBox"><b id="aliveCount">0</b> בחיים</div>
       <div class="pill" id="phaseBox"></div>
       <div class="pill" id="killsBox">⚔ <b id="killCount">0</b></div>
+      <button class="pill leave-btn" id="leaveBtn" title="Esc">🚪 יציאה</button>
     </div>
     <div id="killFeed"></div>
     <div id="centerMsg"></div>
     <div id="lobbyPanel" class="panel hidden">
       <div class="lp-title">אזור אימון</div>
       <div id="roomInfo" class="room-info hidden">
-        <div>קוד חדר: <b id="roomCodeText"></b></div>
+        <div>אתם ב<b id="roomCodeText"></b></div>
         <button id="copyLinkBtn" class="btn">העתק קישור לחברים</button>
         <div id="roomHint" class="lp-hint"></div>
       </div>

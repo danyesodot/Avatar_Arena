@@ -984,7 +984,13 @@
     } else if (msg.t === 'start') {
       if (room.phase === 'lobby' && ['easy', 'medium', 'hard'].includes(msg.diff)) room.difficulty = msg.diff;
       startCountdown(msg.bots);
-    } else if (msg.t === 'char' && BY_ID[msg.char]) {
+    } else if (msg.t === 'char') {
+      // שינוי שם – אפשר בכל רגע
+      if (msg.name) {
+        const nm = String(msg.name).replace(/[<>]/g, '').trim().slice(0, 16);
+        if (nm && nm !== player.name) { emit({ e: 'rename', o: player.name, n: nm }); player.name = nm; }
+      }
+      if (!BY_ID[msg.char] || msg.char === player.char) return;
       if (room.phase === 'lobby' || player.spectator || !player.alive) {
         player.char = msg.char;
         if (room.phase === 'lobby') spawnPlayer(player);
